@@ -1,24 +1,33 @@
-FROM openjdk:8-jre
+FROM ubuntu:16.04
 MAINTAINER Anu krishnan<a4anukrishnan@gmail.com>
 
-# Set home
-ENV HADOOP_HOME=/usr/local/hadoop-2.8.0
-
 # Install dependencies
-RUN apt-get update \
-  && DEBIAN_FRONTEND=noninteractive apt-get install \
-    -yq --no-install-recommends netcat \
-  && apt-get clean \
-	&& rm -rf /var/lib/apt/lists/*
+ENV JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64
+
+RUN apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y openjdk-8-jdk && \
+    rm -rf /var/lib/apt/lists/*
 
 # Install Hadoop
-RUN mkdir -p "${HADOOP_HOME}" \
-  && curl -sSL https://mirrors.ocf.berkeley.edu/apache/hadoop/common/hadoop-2.8.0/hadoop-2.8.0.tar.gz | \
-    tar -xz -C $HADOOP_HOME --strip-components 1 \
-  && rm -rf hadoop-2.8.0.tar.gz
+ENV HADOOP_VERSION=2.8.0
+ENV HADOOP_HOME=/usr/local/hadoop
 
-# HDFS volume
-VOLUME /opt/hdfs
+RUN apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y wget vim curl tar sudo openssh-server openssh-client && \
+    wget http://archive.apache.org/dist/hadoop/core/hadoop-$HADOOP_VERSION/hadoop-$HADOOP_VERSION.tar.gz && \
+    apt-get remove -y wget && \
+    rm -rf /var/lib/apt/lists/* && \
+    tar -zxf /hadoop-$HADOOP_VERSION.tar.gz && \
+    rm /hadoop-$HADOOP_VERSION.tar.gz && \
+    mv hadoop-$HADOOP_VERSION /usr/local/hadoop && \
+    mkdir -p /usr/local/hadoop/logs
+
+RUN rm -f /etc/ssh/ssh_host_dsa_key /etc/ssh/ssh_host_rsa_key /root/.ssh/id_rsa
+RUN ssh-keygen -q -N "" -t dsa -f /etc/ssh/ssh_host_dsa_key
+RUN ssh-keygen -q -N "" -t rsa -f /etc/ssh/ssh_host_rsa_key
+RUN ssh-keygen -q -N "" -t rsa -f /root/.ssh/id_rsa
+RUN cp /root/.ssh/id_rsa.pub /root/.ssh/authorized_keys
+RUN sudo service ssh start
 
 # Set paths
 ENV HADOOP_CONF_DIR=$HADOOP_HOME/etc/hadoop \
@@ -26,22 +35,10 @@ ENV HADOOP_CONF_DIR=$HADOOP_HOME/etc/hadoop \
   PATH=$PATH:$HADOOP_HOME/bin:$HADOOP_HOME/sbin
 
 # Copy and fix configuration files
-COPY /conf/*.xml $HADOOP_CONF_DIR/
-RUN sed -i.bak "s/hadoop-daemons.sh/hadoop-daemon.sh/g" \
-    $HADOOP_HOME/sbin/start-dfs.sh \
-  && rm -f $HADOOP_HOME/sbin/start-dfs.sh.bak \
-  && sed -i.bak "s/hadoop-daemons.sh/hadoop-daemon.sh/g" \
-    $HADOOP_HOME/sbin/stop-dfs.sh \
-  && rm -f $HADOOP_HOME/sbin/stop-dfs.sh.bak
+COPY /conf/* $HADOOP_CONF_DIR/
 
-# HDFS
-EXPOSE 8020 14000 50070 50470
+RUN mkdir -p /data/dfs/data /data/dfs/name /data/dfs/namesecondary && \
+    hdfs namenode -format
+VOLUME /data
 
-# MapReduce
-EXPOSE 10020 13562	19888
-
-# Fix environment for other users
-RUN echo "export HADOOP_HOME=$HADOOP_HOME" > /etc/bash.bashrc.tmp \
-  && echo 'export PATH=$PATH:$HADOOP_HOME/bin:$HADOOP_HOME/sbin'>> /etc/bash.bashrc.tmp \
-  && cat /etc/bash.bashrc >> /etc/bash.bashrc.tmp \
-  && mv -f /etc/bash.bashrc.tmp /etc/bash.bashrc
+EXPOSE 9000 50070 50010 50020 50075 50090
